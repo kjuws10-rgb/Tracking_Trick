@@ -10,14 +10,18 @@ public sealed class MainForm : Form
     private readonly CheckBox enabled = new() { Text = "자동 클릭 활성화", AutoSize = true, Checked = true };
     private readonly Label status = new() { AutoSize = true, ForeColor = Color.DimGray };
     private readonly NotifyIcon tray = null!;
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 150 };
+    // Cursor polling does not need sub-frame precision; 250 ms keeps CPU use negligible.
+    private readonly System.Windows.Forms.Timer timer = new() { Interval = 250 };
     private readonly Random random = new();
     private NativeMouse.POINT previous;
     private DateTime lastMovement;
     private DateTime activeUntil;
     private DateTime nextClick;
     private bool active;
+    private bool armed = true;
     private bool exiting;
+    private string lastStatus = string.Empty;
+    private string lastTrayText = string.Empty;
 
     public MainForm()
     {
@@ -49,6 +53,7 @@ public sealed class MainForm : Form
         tray.DoubleClick += (_, _) => ShowWindow();
 
         enabled.CheckedChanged += (_, _) => ResetState();
+        immediate.CheckedChanged += (_, _) => ResetState();
         minInterval.ValueChanged += (_, _) => ValidateIntervals();
         maxInterval.ValueChanged += (_, _) => ValidateIntervals();
         FormClosing += OnFormClosing;
@@ -59,7 +64,13 @@ public sealed class MainForm : Form
         ResetState();
         timer.Tick += (_, _) => Tick();
         timer.Start();
-        BeginInvoke(HideToTray);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        // A window handle exists here. Calling BeginInvoke from the constructor does not guarantee that.
+        HideToTray();
     }
 
     private static NumericUpDown Number(decimal value, decimal min, decimal max) => new()
@@ -81,6 +92,7 @@ public sealed class MainForm : Form
     private void ResetState()
     {
         active = false;
+        armed = true;
         lastMovement = DateTime.Now;
         if (enabled.Checked && immediate.Checked) StartActive();
         else UpdateStatus();
@@ -94,14 +106,20 @@ public sealed class MainForm : Form
             previous = current;
             // User activity always cancels a current click run and arms a fresh idle period.
             active = false;
+            armed = true;
             lastMovement = DateTime.Now;
         }
 
         if (!enabled.Checked) { UpdateStatus(); return; }
 
         var now = DateTime.Now;
-        if (!active && now - lastMovement >= TimeSpan.FromSeconds((double)idleSeconds.Value)) StartActive();
-        if (active && now >= activeUntil) active = false;
+        if (!active && armed && now - lastMovement >= TimeSpan.FromSeconds((double)idleSeconds.Value)) StartActive();
+        if (active && now >= activeUntil)
+        {
+            active = false;
+            // A completed run must not start again until the user moves the mouse.
+            armed = false;
+        }
         if (active && now >= nextClick)
         {
             NativeMouse.LeftClick();
@@ -128,10 +146,16 @@ public sealed class MainForm : Form
 
     private void UpdateStatus()
     {
-        status.Text = !enabled.Checked ? "상태: 비활성화됨" : active
+        var nextStatus = !enabled.Checked ? "상태: 비활성화됨" : active
             ? $"상태: 클릭 중 · {Math.Max(0, (int)(activeUntil - DateTime.Now).TotalSeconds)}초 남음"
-            : $"상태: 유휴 대기 · {(int)Math.Max(0, ((double)idleSeconds.Value - (DateTime.Now - lastMovement).TotalSeconds))}초";
-        tray.Text = !enabled.Checked ? "Tracking Trick - 비활성화" : active ? "Tracking Trick - 클릭 중" : "Tracking Trick - 대기 중";
+            : armed
+                ? $"상태: 유휴 대기 · {(int)Math.Max(0, ((double)idleSeconds.Value - (DateTime.Now - lastMovement).TotalSeconds))}초"
+                : "상태: 중지됨 · 마우스를 움직이면 다시 대기합니다";
+        var nextTrayText = !enabled.Checked ? "Tracking Trick - 비활성화" : active ? "Tracking Trick - 클릭 중" : armed ? "Tracking Trick - 대기 중" : "Tracking Trick - 중지됨";
+
+        // Avoid redundant UI updates on every timer tick.
+        if (nextStatus != lastStatus) { status.Text = nextStatus; lastStatus = nextStatus; }
+        if (nextTrayText != lastTrayText) { tray.Text = nextTrayText; lastTrayText = nextTrayText; }
     }
 
     private void HideToTray() { Hide(); ShowInTaskbar = false; }
