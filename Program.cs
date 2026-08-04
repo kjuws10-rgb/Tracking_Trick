@@ -17,6 +17,9 @@ internal static class NativeMouse
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out POINT point);
 
+    [DllImport("user32.dll")]
+    internal static extern bool SetCursorPos(int x, int y);
+
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint SendInput(uint count, INPUT[] inputs, int size);
 

@@ -122,7 +122,7 @@ public sealed class MainForm : Form
         }
         if (active && now >= nextClick)
         {
-            NativeMouse.LeftClick();
+            MoveAndClickAtRandomPosition();
             ScheduleNextClick(now);
         }
         UpdateStatus();
@@ -142,6 +142,25 @@ public sealed class MainForm : Form
         var min = (int)minInterval.Value;
         var max = (int)maxInterval.Value;
         nextClick = from.AddSeconds(random.Next(min, max + 1));
+    }
+
+    private void MoveAndClickAtRandomPosition()
+    {
+        // Keep random clicks inside the active monitor's usable area, avoiding its taskbar.
+        NativeMouse.GetCursorPos(out var cursor);
+        var workArea = Screen.FromPoint(new Point(cursor.X, cursor.Y)).WorkingArea;
+        const int padding = 12;
+        var minX = workArea.Left + padding;
+        var maxX = Math.Max(minX, workArea.Right - padding - 1);
+        var minY = workArea.Top + padding;
+        var maxY = Math.Max(minY, workArea.Bottom - padding - 1);
+        var x = random.Next(minX, maxX + 1);
+        var y = random.Next(minY, maxY + 1);
+
+        NativeMouse.SetCursorPos(x, y);
+        // Record the application's own pointer move so the next poll detects only user movement.
+        previous = new NativeMouse.POINT { X = x, Y = y };
+        NativeMouse.LeftClick();
     }
 
     private void UpdateStatus()
