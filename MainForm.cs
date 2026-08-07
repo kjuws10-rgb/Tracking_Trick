@@ -59,12 +59,12 @@ public sealed class MainForm : Form
         Controls.Add(table);
 
         var toolTip = new ToolTip { AutoPopDelay = 9000, InitialDelay = 350, ReshowDelay = 100 };
-        toolTip.SetToolTip(idleSeconds, "마우스가 이 시간 동안 움직이지 않으면 자동 클릭 주기를 시작합니다.");
+        toolTip.SetToolTip(idleSeconds, "마우스 또는 키보드가 이 시간 동안 사용되지 않으면 자동 클릭 주기를 시작합니다.");
         toolTip.SetToolTip(minInterval, "각 클릭 사이의 무작위 대기 시간의 최솟값입니다.");
         toolTip.SetToolTip(maxInterval, "각 클릭 사이의 무작위 대기 시간의 최댓값입니다.");
         toolTip.SetToolTip(activeMinutes, "한 번 시작된 자동 클릭 주기가 유지되는 총 시간입니다.");
         toolTip.SetToolTip(immediate, "자동 클릭을 활성화할 때 유휴 시간을 기다리지 않고 바로 주기를 시작합니다.");
-        toolTip.SetToolTip(status, "클릭 중에는 마우스 이동으로 즉시 중단할 수 있습니다.");
+        toolTip.SetToolTip(status, "클릭 중에는 마우스 이동 또는 키보드 입력으로 즉시 중단할 수 있습니다.");
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open", null, (_, _) => ShowWindow());
@@ -133,13 +133,12 @@ public sealed class MainForm : Form
     private void Tick()
     {
         NativeMouse.GetCursorPos(out var current);
-        if (current.X != previous.X || current.Y != previous.Y)
+        var mouseMoved = current.X != previous.X || current.Y != previous.Y;
+        if (mouseMoved) previous = current;
+
+        if (mouseMoved || KeyboardActivityDetected())
         {
-            previous = current;
-            // User activity always cancels a current click run and arms a fresh idle period.
-            active = false;
-            armed = true;
-            lastMovement = DateTime.Now;
+            ResetForUserActivity();
         }
 
         if (!automationEnabled) { UpdateStatus(); return; }
@@ -158,6 +157,25 @@ public sealed class MainForm : Form
             ScheduleNextClick(now);
         }
         UpdateStatus();
+    }
+
+    private static bool KeyboardActivityDetected()
+    {
+        // The high bit means the key is currently down; the low bit records a press since the last call.
+        // This observes globally pressed keys without intercepting or blocking input.
+        for (var virtualKey = 8; virtualKey <= 254; virtualKey++)
+        {
+            if ((NativeMouse.GetAsyncKeyState(virtualKey) & 0x8001) != 0) return true;
+        }
+        return false;
+    }
+
+    private void ResetForUserActivity()
+    {
+        // Any physical mouse movement or keyboard use cancels the current run and starts a fresh idle period.
+        active = false;
+        armed = true;
+        lastMovement = DateTime.Now;
     }
 
     private void StartActive()
